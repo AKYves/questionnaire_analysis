@@ -1,0 +1,691 @@
+---
+title: "Analyse des données de googlesheet"
+author: "Yves Amevoin"
+date: "12/04/2020"
+output: 
+  html_document:
+    theme: yeti
+    highlight: kate
+    toc: true
+    toc_float: true
+    code_folding: show
+    code_download: true
+---
+
+L'objectif de ce fichier est de présenter les anlayses relatives aux
+données d'un formulaire google. L'enquête a été effectuée
+par Elvis. Elle consiste à recueillir des informations sur une base
+qui constituerait potentiellement des futurs consommateurs de contenu vidéo. Vous pouvez télécharger le fichier Rmarkdown qui a servi à générer ce html en haut à droite.
+
+Les analyses ont été effectuées sous [R](https://www.r-project.org/) en utilisant [Rstudio](https://rstudio.com/).
+
+## Préliminaires (Vous pouvez sauter) {.tabset .tabset-fade}
+
+### Packages et fonctions necessaires
+
+Le chunck suivant charge les packages qui ont été utilisées
+dans mon analyse. Vous devriez les installer si vous ne les avez pas.
+Mais j'écris un petit code qui va se charger d'installer les packages
+quand ils sont non présents.
+
+
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+required_packages <- c("dplyr", "tibble",  "tidyr", "purrr", "ggplot2", 
+                       "scales", "magrittr", "openxlsx", "gt", 
+                       "googledrive", "googlesheets4")
+
+
+pkg_to_inst <- setdiff(required_packages, installed.packages()[,1]) 
+
+if(length(pkg_to_inst)) install.packages(pkg_to_inst)
+
+#chargement des packages
+lapply(required_packages, library, character.only = TRUE)
+#may be you will need also to install ggthemr from github by running
+# devtools::install_github('cttobin/ggthemr')
+#(not necessary though)
+library("ggthemr")
+
+ggthemr("dust")
+```
+
+
+### Les objets que j'utilise
+
+Je définis ici quelques objets que je vais utiliser de par la suite dans mon travail.
+C'est en particulier la liste des thèmes, les expressions régulières utilisées
+pour virer des caractères et aussi quelques redéfinitions de fonctions pour éviter
+les conflits. Il faut aussi ajouter que je ne suis pas très friant de longs noms
+pour les variables, vous pouvez comprendre les noms de variables comme une abbréviation
+anglophone (en enlevant souvent les voyelles).
+
+```{r}
+#regular expression used to filter out every words in the themes exept the
+#theme number. I filtered out also the i7, 2g and usb3 things in the writing.
+
+reg_thm <- "[A-z[:punct:]]|(i\\d?)|(\\d?g)|(usb\\s?\\d?)"
+
+#list of themes of the questionnaire
+themes_names <- c(
+  'Thème 1 : Iphone vs Android phone.',
+  'Thème 2 : Comment fonctionne la caméra de votre Smartphone.',
+  'Thème 3 : Caméra un Smartphone vs appareil photo professionnel',
+  'Thème 4 : Les TV LCD, LED, Plasma, OLED',
+  'Thème 5 : les GAFAM et la question des données sur notre vie privée',
+  'Thème 6 : Le CLOUD',
+  'Thème 7 : Les processeurs Intel, Core i3, Core i5, Core i7, Core i9',
+  'Thème 8 : Les malwares et virus, le piratage et les hackeurs.',
+  'Thème 9 : INTERNET, comment ça fonctionne exactement?',
+  'Thème 10 : NETFLIX, comment ça fonctionne exactement?',
+  'Thème 11 : Différence entre ports USB 2, USB 3 et USB type C.',
+  'Thème 12 : Les réseaux téléphoniques : 2G, 3G, 4G, 5G.',
+  'Thème 13 : Windows vs Linux vs Mac OS',
+  'Thème 14 : Whatsapp, Facebook, Instagram, Youtube: Business model',
+  'Thème 15 : Le téléphone portable, les appels téléphoniques')
+
+#values of works category
+values <- c("administration",  "artisanat et immobilier",
+            "communication et marketing",  "commerce, economie et comptabilite",
+            "litterature et droit", "autres", "scientifique", "it")
+
+#update if you decide to split categories or to add something new
+names(values) <- c("adm_words", "art_words", "com_words", "eco_words", 
+                   "lit_words", "oth_words", "sci_words", "it_words")
+
+
+# Breaks used in graph plots for percentages.
+
+perbreaks <- seq(0, 1, by = 0.025)
+#colors for those breaks. I will put the 25%, 30%, 50% and 60% in red, the
+#others in blue 
+perc_colors <- rep("blue", length(perbreaks))
+perc_colors[c(11, 13, 21, 25)] <- "red"
+
+
+#I dont want to boder myself with future errors on filter and select due
+#to conflicts. So I redefine them
+filt <- dplyr::filter
+selt <- dplyr::select
+
+#Theme I will use
+ggthemr("dust")
+```
+
+### Les fonctions que j'utilise
+
+Les traitements reposent en général sur des fonctions que je vais utiliser. Il y a
+toujours un point "dot" séparant les deux parties des noms de mes fonctions. Celà permet de comprendre à quoi correspond mes fonctions. Il ne s'agit pas d'une méthode d'un objet, c'est ma façon de noter les noms de fonctions.
+
+```{r}
+
+#-- Number of missing value within a vector (vctr)
+nb.nas <- function(vctr) sum(is.na(vctr))
+
+# function to repeat a word a number of times, this number of times
+# is the length of another vector
+rep.lgth <- function(wrd, vctr) rep(wrd, length(vctr))
+
+#-- convert a character vector to asciilower case.
+#-- apply a regular expression to the vector (default is the reg_thm created)
+#-- and deal with empty spaces after
+asc.low <- function(vctr, regex = reg_thm){
+  vctr <- iconv(vctr, from = "UTF-8", to = "ASCII//TRANSLIT") %>% tolower()
+  vctr <- gsub(regex, " ", vctr)
+  gsub("\\s+", " ", trimws(vctr))
+}
+
+#-- clean the other themes vector by removing all the no and so on.
+oth.fct <- function(vctr){
+  vctr <- asc.low(vctr, "^non?\\.?$|^ou?o?i?\\.?|^tout?s?$")
+  gsub("^\\s+$", NA, vctr)
+}
+
+#-- Take a data.frame
+#-- Compute for a variable the number of characters for each individuals or a key
+#-- For individual having the same key, retain only the line corresponding to
+#   the longest number of characters for the given variable
+# idvar is the key var, lgvar is the variable where the nchar is computed.
+rmv.small <- function(a_dt, idvar, lgvar){
+  
+  idvars <- enquo(idvar)
+  lgvars <- enquo(lgvar)
+
+  ag_dt <- a_dt %>%  mutate(lgth = nchar(!!lgvars))
+
+  gp_dt <- ag_dt %>%
+    group_by(!!idvars) %>%
+    summarize(mxlgth = max(lgth))
+
+  ag_dt <- ag_dt %>% left_join(gp_dt, by = quo_name(idvars))
+
+  ag_dt %>%
+   filt(lgth == mxlgth | is.na(lgth)) %>%
+   selt(-c(lgth, mxlgth))
+}
+
+#Take a data.frame
+# For each element of a vector, subset the data.frame for rows of
+# a given variable corresponding to the vector
+# Take for this subset data.frame first element of another vector (only one line)
+# Bind all the first elements together for each element of a vector.
+
+get.fst.hr <- function(a_dt, var, hvar, vctr){
+  var <- enquo(var)
+  hvar <- enquo(hvar)
+  #void data.frame
+  sub_dt <- data.frame()
+  
+  for(i in seq_along(vctr)){
+    #subseting and sorting
+    don <- a_dt %>% 
+      filt(!!var %in% vctr[i]) %>% 
+      arrange(desc(!!hvar)) %>%
+      #select the first line
+      slice(1)
+    #bind with the void data.frame
+    sub_dt <- bind_rows(sub_dt, don)
+  }  
+  #return every thing
+  sub_dt
+}
+
+#
+# 
+
+#-- Take a vector
+#-- Dans dicothomize it for a given length (default is 14)
+# Ex (if length = 5) : c(3, 2, 5) --> (0, 1, 1, 0, 1)
+# The Ones are on the position of in the input vectors, and position not 
+# found correspond to zeros
+dthm.vtr <- function(vctr, lgth = 14){
+  empty <- rep(0, lgth)
+  empty[which(1:lgth %in% vctr)] <- 1
+  empty
+}
+
+#-Take a data.frame
+#- Select some variables
+#- split them on spaces, convert them to numeric and dicotomize them using
+#  previous function
+
+dthm.dt <- function(a_dt, var, l = 14, split = "\\s"){
+  vars <- enquo(var)
+
+  thm_splt <- a_dt %>% selt(!!vars) %>% unlist()
+  # splitting
+  strsplit(thm_splt, split = split) %>%
+    # converting to numeric
+    lapply(as.numeric) %>%
+    #sorting
+    lapply(sort) %>%
+    #dicotomize
+    lapply(dthm.vtr, lgth = l) %>%
+    #combining everything
+    bind_rows() %>%
+    t() %>%
+    as.data.frame() %>%
+    set_colnames(paste("thm", 1:l, sep = ""))
+}
+
+# - Take a data frame
+# - Select some variables of the dataframe
+#- For each variable selected, compute the mean.
+#- In my case I will deal with O and 1, so it is the proportion (of themes)
+comp.thmprop <- function(a_dt, var){
+  var <- enquo(var)
+  
+  a_dt %>%
+    select(!!var) %>%
+    apply(2, mean) %>%
+    enframe(name = "themes", value = "perc") %>%
+    mutate(themes = gsub("^thm", "Theme ", themes))
+}
+
+#- Take a data frame (a_dt)
+#- Select some variables of the dataframe (var)
+#- Compute the sum of the weighted transformation of those variables
+# The weight are obtained by dividing every variable
+# by the rowsum of all the variable. (for one individual)
+
+comp.thmpref <- function(a_dt, var){
+  var <- enquo(var)
+  
+  a_dt %>%
+    select(!!var) %>%
+    apply(1, function(x) x / sum(x, na.rm = TRUE)) %>%
+    apply(1, sum, na.rm = TRUE) %>%
+    enframe(name = "themes", value = "wgt")%>%
+    mutate(themes = gsub("^thm", "Theme ", themes))
+}
+
+# graphic representation function:
+
+
+
+```
+
+## Nettoyage de la base de données {.tabset .tabset-fade}
+
+### Chargement et doublons
+
+
+```{r, results='hide', message = FALSE, warning=FALSE}
+# loading the database. We have twoo options. First one is to download
+# the data from google and put it in the current directory.
+# second one is to download directly from googledrive using the 
+# googledrive and googlesheets  packages.
+
+#uncomment the first line if you were unable to download direclty  and 
+#comment the following line (the line with drive_get). 
+#Don't forget to put the downloaded data in the current working directory
+
+#dt <- read.xlsx("enquete_elvis_tic.xlsx")
+
+dt <- drive_get("enquete_elvis_tic") %>% sheets_read()
+colnames(dt) <- c("hur", "mail", "scr", "thm", "oth_thm",
+                  "wrks", "sex", "age", "cntry", "whats")
+```
+
+Il faut maintenant que je sépare la base de données en deux parties.
+Une première partie pour les personnes n'ayant pas de doublon (en utilisant
+le mail commme une clé) et une seconde partie pour les personnes ayant un
+doublon (la même personne a rempli plusieurs fois le questionnaire).
+
+```{r}
+
+#The first think is to filter them out
+sgl_dt <- dt %>% add_count(mail) %>% filt(n == 1) %>% selt(-n)
+mpl_dt <- dt %>% add_count(mail) %>% filt(n > 1) %>% selt(-n)
+
+#On peut faire un checking pour verifier:
+pourc <- (unique(mpl_dt$mail) %>% length()) / (unique(dt$mail) %>% length())
+nrow(sgl_dt) + nrow(mpl_dt) == nrow(dt)
+```
+
+Il faut maintenant traiter les doublons. Les doublons représentent 
+`r percent(pourc, 0.01)` des observations. Voilà comment en gros je procède
+au traitement sur la base des doublons:
+
+- J'enlève de la base tous ceux qui ne se sont arrêtés qu'au remplissage du 
+mail. Parfois il y a des personnes qui n'ont rien remplies les fois suivantes 
+après avoir rempli totalement le questionnaire la première fois. Je me contente
+juste d'enlever ces lignes. Dans certains cas, celà suffit pour n'avoir que une 
+seule entrée pour ces personnes. J'enlève donc les lignes qui n'ont que l'heure 
+et le mail renseignés, ainsi que la variable `scr`(qui vaut 0 pour tout le monde).
+
+- Je traite les thèmes et les autre thèmes. Pour le traitement des thèmes,
+j'utilise les expressions régulières pour virer tous les labels des thèmes à
+l'exception du numéro du thème proprement dit. Pour le traitement des autres
+thèmes, je me limite seulement à enlever les `oui`, `non` et consort qui ont
+été donnés comme réponse.
+
+- Une fois les thèmes et les autres thèmes traités, je vire les lignes qui
+se répètent (`distinct`). A cette étape, il ne reste qu'à corriger dans la base des doublons, les individus ayant renseigné correctement et de différentes façons le 
+questionnaire plus d'une fois.
+
+- Une analyse m'a permis de voir que la variable qui changeait régulièrement
+pour les individus ayant renseigné le questionnaire correctement plus d'une
+fois est le plus souvent le thème (`thm`) ou les autres thèmes (`othm`). J'ai
+choisi pour ces individus, leur première entrée du questionnaire (en regardant
+l'heure à laquelle ces individus ont envoyé le questionnaire).
+
+```{r}
+
+#first step is to stick to clean and correct the themes, and filter out
+#irrelevant lines
+mpl_dt <- mpl_dt %>%
+  mutate(nb_nas = apply(mpl_dt, 1, nb.nas)) %>%
+  #filtering out non answers // all nas on the line, first 3 columns are
+  # filled
+  filt(nb_nas < (ncol(dt) - 4)) %>% 
+  #dealing with others // using my functions
+  mutate(thm = asc.low(thm)) %>%
+  mutate(oth_thm = oth.fct(oth_thm)) 
+
+#This is where I have my first part (distinct and completely filled more than
+#once)
+mpl_dt_fst <- mpl_dt %>% 
+  selt(-c(hur, nb_nas, whats)) %>%
+  #removing those unwanted variables before focusing on distinct
+  distinct()
+  
+# Now I count those duplicated elements and focus on the hour of recording
+mails_db <- mpl_dt_fst %>% count(mail) %>% filt(n > 1) %>% with(mail)
+
+#I filtered out those mail from the double count and select only the first
+# hour the individual has sent its answer
+mpl_dt_sd <- mpl_dt %>% 
+  get.fst.hr(mail, hur, mails_db) %>%
+  selt(-c(hur, nb_nas, whats))
+  
+
+#unique elements (finally)
+mpl_dt_tr <- mpl_dt_fst %>% filt(!(mail %in% mails_db)) %>% bind_rows(mpl_dt_sd)
+
+# a checking to be sure everything works fine
+nrow(mpl_dt_tr) == (mpl_dt %>% with(mail) %>% unique %>% length)
+
+```
+
+Une fois que le traitement des doublons a été effectué, la prochaine étape 
+consiste a mettre tout ensemble pour obtenir une nouvelle base de données, cette
+fois ci sans doublons et relativement propre. On va aussi dicotomiser
+la variable themes, et commencer par préparer la base de données pour de
+nouvelles analyses.
+
+```{r}
+
+new_dt <- sgl_dt %>%
+  selt(-c(hur, whats)) %>%
+  mutate(thm = asc.low(thm), oth_thm = oth.fct(oth_thm)) %>%
+  bind_rows(mpl_dt_tr)
+
+# I don't border myself with missing values in the cleared data.frame,
+# since they are most of the time non important questions (except the country)
+
+#dicotomization of the theme variable:
+
+# applying the dicotomization on the dataframe of single observations
+new_dt <- new_dt %>%
+  bind_cols(dthm.dt(new_dt, thm))
+```
+
+
+### Les catégories professionnelles
+
+Le nettoyage des catégories socio-professionnelles est relativement simple. On
+commence d'abord par se focaliser sur l'ensemble des catégories qui ont été 
+relevées durant l'enquête, et on les regroupe. Cette partie effectue le traitement
+direct des autres catégories. Il va donc falloir lors d'un rechargement
+de la base de données, s'assurer que toutes les catégories présentes ont 
+été recensées et affectées à une classe bien précise.
+
+```{r}
+#first, we correct the spelling by removing unecessary stuffs
+new_dt <- new_dt %>%
+  mutate(wrks = asc.low(wrks, regex = "\\d"))
+
+#We start by taking a look at unique elements of working group
+list_wrks <- new_dt %>% with(wrks) %>% unique()
+cat(paste(list_wrks, collapse = ". "))
+
+```
+
+Les catégories sont les suivantes, le premier mot du nom de la catégorie
+permet de comprendre à quel groupe elle correspond 
+(sci par ex. pour scientifique, etc.). Vous pouvez ajouter un nouvel
+élément dans la catégorie correspondante (en séparant chaque élément 
+d'une virgule) si vous vous rendez compte qu'il y a de nouvelles catégories
+qui apparaissent.
+
+```{r}
+sci_words <- c("scientifique", "para medical", "engenierie", "sante",
+               "medecine", "bioethique", "recherche", "enseignant")
+it_words <- c("technologie")
+com_words <- c("communication", "communication/marketing/journalisme")
+art_words <- c("artisanat", "btp", "architecture immobilier", "stylisme",
+                "transport")
+adm_words <- c("technique administrative", "diplomatie", "securite publique")
+eco_words <- c("commerce/gestion/economie", "audit et comptabilite")
+lit_words <-c("litteraire/droit/langue", "droit et langue")
+oth_words <- c("eleve", "etudiant")
+
+# a little check to be sure everything is ok. I think you will have to readjust
+# or add some elements to classes if necessary.
+categ <- grep("words$", ls(), value = TRUE)
+tst_vc <- categ  %>% lapply(function(x) get(x))
+
+names(tst_vc) <- categ
+
+
+#This should return TRUE if not you can update.
+#The -1 is to take in account the NAs
+length(unlist(tst_vc)) == length(list_wrks) - 1
+#This should give you only NA. If not, update element in the corresponding
+#category up there.
+list_wrks[!(list_wrks %in% unlist(tst_vc))]
+
+#repeat the works categories, for the length or each element of tst_vc
+wrks <- tst_vc %>% 
+  enframe(value = "vctr") %>% 
+  left_join(enframe(values, value = "wrd"), by = "name") %>% 
+  selt(-name) %>% 
+  selt(wrd, vctr)
+
+wrks <- pmap(wrks, rep.lgth) %>% unlist()
+
+# Now it is time to recode everything.
+dt_wrks <- data.frame(wrks = unlist(tst_vc), wrks_rec = wrks, 
+                      stringsAsFactors = F)
+#join the new data.frame with the previous one to obtain recode version
+new_dt <- new_dt %>% left_join(dt_wrks, by = "wrks")
+```
+
+### sous bases et autres
+
+Parfois au cours de l'analyse, j'aurai besoin de certaines sous-bases
+sur ma base globale ou de certains objets. Pour éviter de les mélanger avec
+la partie analyse, je les crée dans cette partie.
+
+```{r}
+#number of individuals
+n <- nrow(new_dt)
+#database for women
+wnew_dt <- new_dt %>% filt(sex == "Femme")
+#database for men
+mnew_dt <- new_dt %>% filt(sex == "Homme")
+itnew_dt <- new_dt %>% filt(wrks_rec == "it")
+#Number of themes per persons
+new_dt <- new_dt %>% 
+  mutate(nb_thm = apply(new_dt %>% selt(thm1:thm14), 1, sum))
+#number of male, female and its
+nfem <- nrow(wnew_dt)
+nmal <- nrow(mnew_dt)
+nits <- nrow(itnew_dt)
+
+#kableExtra function for representing my tables
+pr.mytab <- function(a_dt){
+  kable(a_dt) %>% 
+    kable_styling(c("stripped", "responsive", "hover"), 
+                  full_width = T)
+}
+
+# find the most and less represented within a table
+fd.most <- function(vctr) names(which.max(table(vctr)))
+fd.less <- function(vctr) names(which.min(table(vctr)))
+
+# Now this function will help printing a table on one variable
+
+sum.tb <- function(a_dt, var, name, header = "Titre"){
+  var <- enquo(var)
+  names <- enquo(name)
+  
+  #creating the data frame of counts
+  first_dat <- a_dt %>% count(!!var, name = "nub") 
+  
+  #number of missing values
+  nb_miss <- first_dat %>% filter(is.na(!!var)) %>% with(nub)
+  #I have to check If I have no missing values
+  if(!length(nb_miss)) nb_miss <- 0
+  nb_nonmiss <- nrow(a_dt) - nb_miss
+  
+  #presenting the data
+  first_dat %>% 
+    filt(!is.na(!!var)) %>% 
+    arrange(nub) %>% 
+    mutate(perc = percent(nub / sum(nub), 0.01)) %>% 
+    apply(2, as.character) %>%
+    set_colnames(c("v", "nub", "perc")) %>%
+  #I have to convert so that I can add some rows after
+    as.data.frame() %>% 
+  # adding the last row (on totals)
+    add_row(v = "Total",  
+            nub = paste(nb_nonmiss, " (Manquants = ", (nb_miss), ")", sep = ""),
+            perc = percent(1, 0.01)) %>%
+    set_colnames(c(name, "nb de personnes", "pourcentage")) %>% 
+  # presenting the table format
+    gt() %>%
+    tab_header(md(header)) %>% 
+    cols_align(align = "center", columns = vars(`nb de personnes`, pourcentage)) 
+}
+
+#compute percentage of persons
+
+comp.perc <- function(vctr, whc, crude = F){
+  #Test if I have to return crude vector or not
+  tortrn <- prop.table(table(vctr))[whc]
+  if(!crude) tortrn <- tortrn %>% percent(0.01)
+
+  tortrn
+}
+
+
+```
+
+
+## Analyses decriptives {.tabset .tabset-fade}
+
+Cette partie présente les résultats généraux qui vont provenir de l'analyse
+descriptive de la base de données. En premier il y aura une présentation
+globale de la structure de la base, suivi d'un examen des thèmes choisis (avec
+au passage des croisements qui vont être effectués dessus). Et pour finir,
+On peut aller un peu plus loin avec des analyses plus poussées.
+
+### Structure générale
+
+La base est constituée de  `r n` individus dont `r percent((nfem / n), 0.01)`
+de femmes. La répartition des personnes enquêtées par groupe d'âge est présentée
+dans le prochain tableau. La catégorie d'âge la plus fréquente ayant répondu
+est celle des  `r fd.most(new_dt$age)` et celle la moins fréquente est
+celle des `r fd.less(new_dt$age)`.
+
+```{r}
+sum.tb(new_dt, age, "groupes d'âge", "Répartition des enquêtés par groupe d'âge")
+
+```
+
+
+Les personnes ayant participé au questionnaire proviennent de différents 
+secteurs, le secteur le plus fréquent étant **`r fd.most(new_dt$wrks_rec)`**
+représentant `r comp.perc(new_dt$wrks_rec, fd.most(new_dt$wrks_rec))` des enquêtés.
+Le tableau suivant montre la répartition des personnes enquêtées suivant
+l'appartenance aux différents secteurs d'activité. A noter la présence
+de manquants, qui signifie que des personnes n'ont pas renseigné la catégorie 
+d'appartenance. 
+
+
+```{r}
+
+sum.tb(new_dt, wrks_rec, "Secteur act.", "Répartition des enquêtés par Secteur d'activité")
+
+# preparing discussion about themes.
+nbthm5 <- comp.perc(new_dt %>% with(nb_thm), "5")
+nbthml5 <- sum(comp.perc(new_dt %>% with(nb_thm), as.character(1:5), crude = T))
+```
+
+
+En général `r nbthm5` des personnes ont choisi exactement
+5 thèmes. Sur les `r n` personnes ayant participés, `r nbthml5` ont choisi
+au moins 5 thèmes. Le graphique suivant montre la répartition du nombre
+de thèmes par secteur d'activités:
+
+```{r, fig.width= 9,fig.height= 9, fig.align="center"}
+
+new_dt %>% 
+  count(wrks_rec, nb_thm) %>% 
+  filt(!is.na(wrks_rec)) %>% 
+  ggplot() +
+  geom_segment(aes(x = nb_thm, y = 0, xend = nb_thm, yend = n), colour = "brown") +
+  geom_point(aes(x = nb_thm, y = n), size = 1, color = "brown")+
+  facet_wrap(~wrks_rec, nrow = 3, ncol = 3)+
+  scale_x_continuous(breaks = seq(0:14))+
+  scale_y_continuous(breaks = seq(0, 40, by = 2)) +
+  labs(x = "Différents thèmes", y = "Nombre de thèmes choisis")
+
+
+
+```
+
+
+### Les Thèmes choisis
+
+Cette section étudie les thèmes choisis et les présente. On commence par se 
+focaliser sur un pourcentage de 100 qui montre pour chaque thème, la
+proportion des personnes l'ayant choisi. Le graphe suivant illustre
+le résultat.
+
+```{r, fig.width=10, fig.height=9}
+# graphing the themes:
+main_thm <- comp.thmprop(new_dt, thm1:thm14)
+
+nthmlbl <- paste(themes_names[order(-main_thm$perc)], collapse = "\n")
+
+main_thm %>% 
+  ggplot(aes(x = reorder(themes, -perc))) +
+  geom_bar(aes(y = perc), stat = "identity", width = 0.6)+
+  labs(x = "Différents Thèmes", 
+       y = "Pourcentage des personnes enquêtées ayant choisi le thème")+
+  scale_y_continuous(breaks = perbreaks, labels = percent)+
+  annotate("label", x = 6, y= 0.5, label = nthmlbl, hjust = 0, size = 3.5)
+
+```
+
+Les 5 premiers thèmes les plus choisis sont les 
+`r paste(main_thm %>% arrange(desc(perc)) %>% with(themes[1:5]), collapse = ", ")`
+eu égard le nombre de thème choisi par les répondants. On vérifie si le
+constat est le même par secteur d'activité
+
+### Les croisements
+
+## Un peu plus loin {.tabset .tabset-fade}
+
+Cette partie va un peu plus en profondeur dans l'analyse. On peut regarder
+comment les préférences des thèmes sont réparties, et décider si oui ou non
+certains thèmes sont plus proches (eu égard les individus qui les ont choisi).
+
+### Analyses en composantes
+
+
+
+
+
+### La base finale
+
+Il y a la base de données nettoyée, enregistrée au format xlsx.
+
+```{r, results='show'}
+wb <- createWorkbook()
+labs <- c("mails des repondants",
+            "score",
+            "thèmes",
+            "autres thèmes",
+            "Secteur d'activité",
+            "Sexe",
+            "Groupe d'âge",
+            "Pays",
+            paste("A choisi le thème", 1:14),
+            "Secteur d'activité nettoyé",
+            "Nombre de thèmes choisi")
+label_dt <- data.frame(variables = colnames(new_dt), labels = labs)
+addWorksheet(wb, "base_nettoyee")
+addWorksheet(wb, "label_variables")
+
+writeData(wb, sheet = "base_nettoyee", new_dt)
+writeData(wb, sheet = "label_variables", x = "Label des variables de la base")
+writeData(wb, sheet = "label_variables", label_dt, startRow = 3)
+
+saveWorkbook(wb, file = "base_finale.xlsx", overwrite = TRUE)
+
+
+# probably you will need the mails of respondants
+# I promised to give the analysis to some of my group as a motivation fo fill 
+# the questionnaire. Mails are registred in mail_list.txt
+# For whatsapp numbers, I let you deal with that.
+sink("mail_list.txt", append = FALSE)
+cat(paste(new_dt$mail, collapse = ", "))
+sink()
+```
+
+
