@@ -32,6 +32,8 @@ quand ils sont non présents.
 
 ```{r message=FALSE, warning=FALSE, results='hide'}
 
+knitr::opts_chunk$set(fig.path = "./figures/")
+
 required_packages <- c("dplyr", "tibble",  "tidyr", "purrr", "ggplot2", 
                        "scales", "magrittr", "openxlsx", "gt", 
                        "googledrive", "googlesheets4")
@@ -545,7 +547,7 @@ comp.perc <- function(vctr, whc, crude = F){
 ```
 
 
-## Analyses decriptives {.tabset .tabset-fade}
+## Analyses decriptives
 
 Cette partie présente les résultats généraux qui vont provenir de l'analyse
 descriptive de la base de données. En premier il y aura une présentation
@@ -589,9 +591,9 @@ nbthml5 <- sum(comp.perc(new_dt %>% with(nb_thm), as.character(1:5), crude = T))
 En général `r nbthm5` des personnes ont choisi exactement
 5 thèmes. Sur les `r n` personnes ayant participés, `r nbthml5` ont choisi
 au moins 5 thèmes. Le graphique suivant montre la répartition du nombre
-de thèmes par secteur d'activités:
+de thèmes choisis par secteur d'activités. 
 
-```{r, fig.width= 9,fig.height= 9, fig.align="center"}
+```{r nb-themes-choisis, fig.width= 9,fig.height= 9, fig.align="center"}
 
 new_dt %>% 
   count(wrks_rec, nb_thm) %>% 
@@ -602,7 +604,7 @@ new_dt %>%
   facet_wrap(~wrks_rec, nrow = 3, ncol = 3)+
   scale_x_continuous(breaks = seq(0:14))+
   scale_y_continuous(breaks = seq(0, 40, by = 2)) +
-  labs(x = "Différents thèmes", y = "Nombre de thèmes choisis")
+  labs(y = "Nombre de personnes ayant choisi ce nombre", x = "Nombre de thèmes choisis")
 
 
 
@@ -616,7 +618,7 @@ focaliser sur un pourcentage de 100 qui montre pour chaque thème, la
 proportion des personnes l'ayant choisi. Le graphe suivant illustre
 le résultat.
 
-```{r, fig.width=10, fig.height=9}
+```{r choix-theme-global, fig.width=10, fig.height=8}
 # graphing the themes:
 main_thm <- comp.thmprop(new_dt, thm1:thm14)
 
@@ -634,10 +636,175 @@ main_thm %>%
 
 Les 5 premiers thèmes les plus choisis sont les 
 `r paste(main_thm %>% arrange(desc(perc)) %>% with(themes[1:5]), collapse = ", ")`
-eu égard le nombre de thème choisi par les répondants. On vérifie si le
-constat est le même par secteur d'activité
+sans prendre en compte le nombre de thèmes choisi par les répondants. 
+On vérifie si le constat est le même par secteur d'activité à travers le
+graphique suivant:
 
-### Les croisements
+```{r choix-themes-activites, fig.width=10, fig.height=10}
+
+# first I split my data 
+new_dt %>% 
+split( with(new_dt, wrks_rec))%>% 
+  map_dfr(function(x) comp.thmprop(x, thm1:thm14), .id = "wrks_rec") %>% 
+ ggplot(aes(x = gsub("Theme", "", themes) %>% as.numeric())) +
+  geom_bar(aes(y = perc), stat = "identity", width = 0.6)+
+  labs(x = "Différents Thèmes", 
+       y = "Pourcentage des personnes enquêtées ayant choisi le thème")+
+  scale_y_continuous(breaks = seq(0, 1, by = 0.05), labels = percent)+
+  scale_x_continuous(breaks = 1:14)+
+  facet_wrap(~wrks_rec, nrow = 3, ncol = 3)
+
+
+```
+
+On peut maintenant se focaliser sur la même répartition, mais par groupe
+d'âge. On sera plus enclin à voir quels sont les thèmes fréquemment choisis
+par chaque groupe d'âge.
+
+```{r choix-themes-ages, fig.width=10, fig.height=8}
+new_dt %>% 
+split(with(new_dt, age))%>% 
+  map_dfr(function(x) comp.thmprop(x, thm1:thm14), .id = "wrks_rec") %>% 
+ ggplot(aes(x = gsub("Theme", "", themes) %>% as.numeric())) +
+  geom_bar(aes(y = perc), stat = "identity", width = 0.6)+
+  labs(x = "Différents Thèmes", 
+       y = "Pourcentage des personnes enquêtées ayant choisi le thème")+
+  scale_y_continuous(breaks = seq(0, 1, by = 0.05), labels = percent)+
+  scale_x_continuous(breaks = 1:14)+
+  facet_wrap(~wrks_rec, ncol = 2)
+```
+
+Et pour finir, on effectue la même chose par sexe (On verra si les femmes aiment l'argent). Je ne rentre pas en profondeur dans les commentaires, parce
+que je ne sais pas comment les données se comporteront par la suite.
+
+```{r choix-themes-sexe, fig.width=10, fig.height=7}
+
+new_dt %>% 
+split(with(new_dt, sex))%>% 
+  map_dfr(function(x) comp.thmprop(x, thm1:thm14), .id = "wrks_rec") %>% 
+ ggplot(aes(x = gsub("Theme", "", themes) %>% as.numeric())) +
+  geom_bar(aes(y = perc), stat = "identity", width = 0.6)+
+  labs(x = "Différents Thèmes", 
+       y = "Pourcentage des personnes enquêtées ayant choisi le thème")+
+  scale_y_continuous(breaks = seq(0, 1, by = 0.05), labels = percent)+
+  scale_x_continuous(breaks = 1:14)+
+  facet_wrap(~wrks_rec, ncol = 2)
+
+
+
+```
+
+Nous avons dans les analyses précédentes considéré que le nombre de personnes
+ayant choisi un thème. Cette fois ci, nous allons nous appuyer sur une pondération
+que nous avons créé pour examiner les préférences, en rangeant suitant
+les différentes modalités du secteur d'activité, du groupe d'âge, et du sexe.
+
+Commençons d'abord par une représentation globale:
+
+```{r pref-theme-global, fig.width=10, fig.height=7}
+
+pref_thm <- comp.thmpref(new_dt, thm1:thm14)
+nthmlbl <- paste(themes_names[order(-pref_thm$wgt)], collapse = "\n")
+
+ggplot(pref_thm, aes(x = reorder(themes, -wgt))) +
+  geom_segment(aes(yend = wgt, xend = reorder(themes, -wgt), y=0), size = 0.7,
+               colour = "brown") +
+  geom_point(aes(y = wgt), size = 3)+
+  labs(x = "Différents Thèmes", y = "Préférences des personnes enquêtées")+
+  scale_y_continuous(breaks = seq(0, 50, by = 2))+
+  annotate("label", x = 8, y= 25, label = nthmlbl, hjust = 0, size = 3.5)
+
+
+
+```
+
+Les préférences pour les secteurs d'activité:
+
+```{r pref-theme-activites, fig.width=10, fig.height=7}
+new_dt %>% 
+split(with(new_dt, wrks_rec))%>% 
+  map_dfr(function(x) comp.thmpref(x, thm1:thm14), .id = "wrks_rec") %>% 
+  mutate(themes = gsub("Theme", "", themes) %>% as.numeric() ) %>% 
+  ggplot(aes(x =  themes)) +
+  geom_segment(aes(yend = wgt, xend =  themes, y=0), size = 0.7,
+               colour = "brown") +
+  geom_point(aes(y = wgt), size = 3)+
+  labs(x = "Différents Thèmes", y = "Préférences des personnes enquêtées")+
+  scale_y_continuous(breaks = seq(0, 50, by = 2))+
+  scale_x_continuous(breaks = 1:14)+
+  facet_wrap(~wrks_rec, ncol = 2)
+  
+
+
+
+
+```
+
+
+
+Les préférences pour les groupe d'âge
+
+```{r pref-theme-age, fig.width=10, fig.height=7}
+
+new_dt %>% 
+split(with(new_dt, age))%>% 
+  map_dfr(function(x) comp.thmpref(x, thm1:thm14), .id = "wrks_rec") %>% 
+  mutate(themes = gsub("Theme", "", themes) %>% as.numeric() ) %>% 
+  ggplot(aes(x =  themes)) +
+  geom_segment(aes(yend = wgt, xend =  themes, y=0), size = 0.7,
+               colour = "brown") +
+  geom_point(aes(y = wgt), size = 3)+
+  labs(x = "Différents Thèmes", y = "Préférences des personnes enquêtées")+
+  scale_y_continuous(breaks = seq(0, 50, by = 2))+
+  scale_x_continuous(breaks = 1:14)+
+  facet_wrap(~wrks_rec, ncol = 2)
+  
+
+
+```
+
+
+
+Et enfin les préférences par sexe:
+
+
+```{r pref-theme-sexe, fig.width=10, fig.height=7}
+
+new_dt %>% 
+split(with(new_dt, sex))%>% 
+  map_dfr(function(x) comp.thmpref(x, thm1:thm14), .id = "wrks_rec") %>% 
+  mutate(themes = gsub("Theme", "", themes) %>% as.numeric() ) %>% 
+  ggplot(aes(x =  themes)) +
+  geom_segment(aes(yend = wgt, xend =  themes, y=0), size = 0.7,
+               colour = "brown") +
+  geom_point(aes(y = wgt), size = 3)+
+  labs(x = "Différents Thèmes", y = "Préférences des personnes enquêtées")+
+  scale_y_continuous(breaks = seq(0, 50, by = 2))+
+  scale_x_continuous(breaks = 1:14)+
+  facet_wrap(~wrks_rec, ncol = 2)
+  
+
+```
+
+### Les tests
+
+On a remarqué que à part les 4 premiers thèmes et les 2 derniers thèmes,
+les thèmes se trouvant au milieu, ont des préférences relativement très 
+proches. Puisque nous disposons de la distribution de ces thèmes, nous allons
+tester si les préférences sont égales, ou si la différence que nous observons
+n'est pas statistiquement significative.
+
+Nous passons pour celà à un test de kruskall wallis sur les thèmes
+"du milieu". Il faut d'abord les identifier et ensuite truturer un peu
+la base de données.
+
+```{r}
+
+
+
+
+```
+
 
 ## Un peu plus loin {.tabset .tabset-fade}
 
@@ -683,9 +850,9 @@ saveWorkbook(wb, file = "base_finale.xlsx", overwrite = TRUE)
 # I promised to give the analysis to some of my group as a motivation fo fill 
 # the questionnaire. Mails are registred in mail_list.txt
 # For whatsapp numbers, I let you deal with that.
-sink("mail_list.txt", append = FALSE)
+#sink("mail_list.txt", append = FALSE)
 cat(paste(new_dt$mail, collapse = ", "))
-sink()
+#sink()
 ```
 
 
