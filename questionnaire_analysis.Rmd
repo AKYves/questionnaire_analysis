@@ -12,7 +12,7 @@ output:
     code_download: true
 ---
 
-L'objectif de ce fichier est de présenter les anlayses relatives aux
+L'objectif de ce fichier est de présenter les analyses relatives aux
 données d'un formulaire google. L'enquête a été effectuée
 par Elvis. Elle consiste à recueillir des informations sur une base
 qui constituerait potentiellement des futurs consommateurs de contenu vidéo. Vous pouvez télécharger le fichier Rmarkdown qui a servi à générer ce html en haut à droite.
@@ -21,7 +21,7 @@ Les analyses ont été effectuées sous [R](https://www.r-project.org/) en utili
 
 ## Préliminaires (Vous pouvez sauter) {.tabset .tabset-fade}
 
-### Packages et fonctions necessaires
+### Package et fonctions nécessaires
 
 Le chunck suivant charge les packages qui ont été utilisées
 dans mon analyse. Vous devriez les installer si vous ne les avez pas.
@@ -36,7 +36,7 @@ knitr::opts_chunk$set(fig.path = "./figures/")
 
 required_packages <- c("dplyr", "tibble",  "tidyr", "purrr", "ggplot2", 
                        "scales", "magrittr", "openxlsx", "gt", 
-                       "googledrive", "googlesheets4")
+                       "googledrive", "googlesheets4", "FactoMineR")
 
 
 pkg_to_inst <- setdiff(required_packages, installed.packages()[,1]) 
@@ -59,8 +59,8 @@ ggthemr("dust")
 Je définis ici quelques objets que je vais utiliser de par la suite dans mon travail.
 C'est en particulier la liste des thèmes, les expressions régulières utilisées
 pour virer des caractères et aussi quelques redéfinitions de fonctions pour éviter
-les conflits. Il faut aussi ajouter que je ne suis pas très friant de longs noms
-pour les variables, vous pouvez comprendre les noms de variables comme une abbréviation
+les conflits. Il faut aussi ajouter que je ne suis pas très friand de longs noms
+pour les variables, vous pouvez comprendre les noms de variables comme une abréviation
 anglophone (en enlevant souvent les voyelles).
 
 ```{r}
@@ -118,7 +118,7 @@ ggthemr("dust")
 ### Les fonctions que j'utilise
 
 Les traitements reposent en général sur des fonctions que je vais utiliser. Il y a
-toujours un point "dot" séparant les deux parties des noms de mes fonctions. Celà permet de comprendre à quoi correspond mes fonctions. Il ne s'agit pas d'une méthode d'un objet, c'est ma façon de noter les noms de fonctions.
+toujours un point "dot" séparant les deux parties des noms de mes fonctions. Cela permet de comprendre à quoi correspond mes fonctions. Il ne s'agit pas d'une méthode d'un objet, c'est ma façon de noter les noms de fonctions.
 
 ```{r}
 
@@ -264,8 +264,6 @@ comp.thmpref <- function(a_dt, var){
 
 # graphic representation function:
 
-
-
 ```
 
 ## Nettoyage de la base de données {.tabset .tabset-fade}
@@ -292,7 +290,7 @@ colnames(dt) <- c("hur", "mail", "scr", "thm", "oth_thm",
 
 Il faut maintenant que je sépare la base de données en deux parties.
 Une première partie pour les personnes n'ayant pas de doublon (en utilisant
-le mail commme une clé) et une seconde partie pour les personnes ayant un
+le mail comme une clé) et une seconde partie pour les personnes ayant un
 doublon (la même personne a rempli plusieurs fois le questionnaire).
 
 ```{r}
@@ -313,7 +311,7 @@ au traitement sur la base des doublons:
 - J'enlève de la base tous ceux qui ne se sont arrêtés qu'au remplissage du 
 mail. Parfois il y a des personnes qui n'ont rien remplies les fois suivantes 
 après avoir rempli totalement le questionnaire la première fois. Je me contente
-juste d'enlever ces lignes. Dans certains cas, celà suffit pour n'avoir que une 
+juste d'enlever ces lignes. Dans certains cas, cela suffit pour n'avoir que une 
 seule entrée pour ces personnes. J'enlève donc les lignes qui n'ont que l'heure 
 et le mail renseignés, ainsi que la variable `scr`(qui vaut 0 pour tout le monde).
 
@@ -374,7 +372,7 @@ nrow(mpl_dt_tr) == (mpl_dt %>% with(mail) %>% unique %>% length)
 Une fois que le traitement des doublons a été effectué, la prochaine étape 
 consiste a mettre tout ensemble pour obtenir une nouvelle base de données, cette
 fois ci sans doublons et relativement propre. On va aussi dicotomiser
-la variable themes, et commencer par préparer la base de données pour de
+la variable thèmes, et commencer par préparer la base de données pour de
 nouvelles analyses.
 
 ```{r}
@@ -547,7 +545,7 @@ comp.perc <- function(vctr, whc, crude = F){
 ```
 
 
-## Analyses decriptives
+## Analyses descriptives
 
 Cette partie présente les résultats généraux qui vont provenir de l'analyse
 descriptive de la base de données. En premier il y aura une présentation
@@ -579,8 +577,9 @@ d'appartenance.
 
 
 ```{r}
-
-sum.tb(new_dt, wrks_rec, "Secteur act.", "Répartition des enquêtés par Secteur d'activité")
+sum.tb(new_dt, wrks_rec, "Secteur act.", 
+       "Répartition des enquêtés par Secteur d'activité"
+       )
 
 # preparing discussion about themes.
 nbthm5 <- comp.perc(new_dt %>% with(nb_thm), "5")
@@ -589,7 +588,7 @@ nbthml5 <- sum(comp.perc(new_dt %>% with(nb_thm), as.character(1:5), crude = T))
 
 
 En général `r nbthm5` des personnes ont choisi exactement
-5 thèmes. Sur les `r n` personnes ayant participés, `r nbthml5` ont choisi
+5 thèmes. Sur les `r n` personnes ayant participé, `r nbthml5` ont choisi
 au moins 5 thèmes. Le graphique suivant montre la répartition du nombre
 de thèmes choisis par secteur d'activités. 
 
@@ -696,7 +695,7 @@ split(with(new_dt, sex))%>%
 
 Nous avons dans les analyses précédentes considéré que le nombre de personnes
 ayant choisi un thème. Cette fois ci, nous allons nous appuyer sur une pondération
-que nous avons créé pour examiner les préférences, en rangeant suitant
+que nous avons créé pour examiner les préférences, en rangeant suivant
 les différentes modalités du secteur d'activité, du groupe d'âge, et du sexe.
 
 Commençons d'abord par une représentation globale:
@@ -795,14 +794,47 @@ tester si les préférences sont égales, ou si la différence que nous observon
 n'est pas statistiquement significative.
 
 Nous passons pour celà à un test de kruskall wallis sur les thèmes
-"du milieu". Il faut d'abord les identifier et ensuite truturer un peu
+"du milieu". Il faut d'abord les identifier et ensuite torturer un peu
 la base de données.
+
 
 ```{r}
 
+inter_thm <- pref_thm %>% 
+  arrange(desc(wgt)) %>%
+  #four first out and four last out
+  with(themes[5:10])
 
+inter_thm <- gsub("[A-z]|\\s", "", inter_thm)
+inter_thm <- paste("thm", inter_thm, sep = "")
 
+# weighted thm data
+wgt_thm <- new_dt %>% 
+ selt(thm1:thm14) %>% 
+ apply(1, function(x) x / sum(x, na.rm = TRUE)) %>% 
+ t() %>% 
+ as.data.frame()
 
+#selecting the themes for a kruskall wallis test.
+thm_dt <- wgt_thm %>% 
+ as.data.frame() %>% 
+ selt(all_of(inter_thm)) %>% 
+ gather(key = "themes", value = "wgt")
+
+#we start with a graphical view
+
+ggplot(thm_dt %>% filt(!is.nan(wgt)), aes(x = themes, y = wgt)) + 
+  geom_boxplot()+
+  labs(x = "Thèmes du milieu", y = "Distribution des préférences")
+
+#On effectue maintenant le test
+test_data <- kruskal.test(themes ~ wgt, data = thm_dt)
+
+if(test_data$p.value > 0.1){
+  cat("Les préférences des thèmes du milieu sont statistiquement égales")
+} else{
+  cat("Les préférences des thèmes du milieu sont statistiquement différentesy")
+}
 ```
 
 
@@ -815,7 +847,52 @@ certains thèmes sont plus proches (eu égard les individus qui les ont choisi).
 ### Analyses en composantes
 
 
+```{r}
+library(FactoMineR)
 
+pca_dt <- wgt_thm %>% 
+  bind_cols(new_dt %>% selt(age, wrks)) %>% 
+  filt(!is.na(thm1) & !is.na(wrks))
+
+acp <- PCA(pca_dt, graph = FALSE, ncp = 8, quali.sup = c(15, 16))
+eig <- acp$eig
+
+colnames(eig) <- c("eig", "perc", "cum")
+eig <- as.data.frame(eig)
+eig$comp <- 1:14
+
+#graphing eigen values
+ggplot(eig, aes(x = comp, y = perc))+
+  geom_point()+
+  geom_line()+
+  scale_x_continuous(breaks = 1:14)+
+  labs(x = "Composantes", y = "Pourcentage de variance")
+```
+
+Vue le caractère très sparse de la matrice, il aurait mieux fallu faire un
+acp sur des données sparses. Mais je ne veux pas rentrer dans ces considérations.
+On peut se limiter au choix 8 premières composantes. Elles
+représentent environ `r round(eig$cum[8],2)`% des variations dans les données
+(beaucoup de composantes, je sais). On va commencer par effectuer une rotation
+de la matrice des coordonnées des variables pour effectuer une interprétation.
+L'examen du cercle de corrélation est inutile, puisque les variables ne
+seraient pas assez bien représentées sur les deux premières composantes.
+
+
+```{r}
+
+rot_var <- varimax(acp$var$coord)
+
+rot_var$loadings
+```
+
+
+On peut regarder les loadings sur les rotations et effectuer quelques 
+commentaires. Les individus ayant préféré les thèmes 9, n'ont en général
+pas choisi les thèmes 7 et 4. D'un autre coté, les individus qui ont préféré
+le thème 10 ont en général préféré aussi le thème 10. Les thèmes 2 et 3 sont relativement proches en termes de préférences des individus.. Bon peut explorer
+la matrice pour regarder les thèmes ayant les poids élevés et de même signe sur chacune des dimensions. Puisque la base va changer à l'avenir,
+je ne rentre pas complètement dans les interprétations.
 
 
 ### La base finale
@@ -824,7 +901,7 @@ Il y a la base de données nettoyée, enregistrée au format xlsx.
 
 ```{r, results='show'}
 wb <- createWorkbook()
-labs <- c("mails des repondants",
+labs <- c("mails des répondants",
             "score",
             "thèmes",
             "autres thèmes",
@@ -845,6 +922,8 @@ writeData(wb, sheet = "label_variables", label_dt, startRow = 3)
 
 saveWorkbook(wb, file = "base_finale.xlsx", overwrite = TRUE)
 
+# I also have an R version of the data
+rbase <- list(data = new_dt, labels_data = label_dt)
 
 # probably you will need the mails of respondants
 # I promised to give the analysis to some of my group as a motivation fo fill 
